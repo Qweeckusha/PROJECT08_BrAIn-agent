@@ -1,5 +1,5 @@
 .venv
 .idea
-vectors.json
+faiss_index
 brain.json
 improvements.md
