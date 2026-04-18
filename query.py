@@ -12,7 +12,10 @@ from langchain_core.output_parsers import StrOutputParser
 #                 КОМПОНЕНТЫ
 # ==========================================
 
-embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+embeddings = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/all-mpnet-base-v2",
+    encode_kwargs={"normalize_embeddings": True}
+)
 
 # --- Векторная база ---
 if not os.path.exists("faiss_index"):
