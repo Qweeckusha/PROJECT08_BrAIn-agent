@@ -3,18 +3,22 @@ import uuid
 import os
 from datetime import datetime
 
+import numpy as np
 from langchain_openai import ChatOpenAI
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
+import faiss
+from langchain_community.docstore.in_memory import InMemoryDocstore
+
 # ==========================================
 #               КОНФИГУРАЦИЯ
 # ==========================================
 LM_STUDIO_URL = "http://localhost:1234/v1"
-GENERATION_MODEL = "qwen/qwen3-4b-2507"  # ← Проверь название в LM Studio
-EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+GENERATION_MODEL = "qwen/qwen3-4b-2507"
+EMBEDDING_MODEL = "sentence-transformers/all-mpnet-base-v2"
 
 BRAIN_FILE = "brain.json"
 FAISS_INDEX = "faiss_index"
@@ -24,7 +28,10 @@ FAISS_INDEX = "faiss_index"
 # ==========================================
 print("📦 Загрузка LangChain компонентов...")
 
-embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
+embeddings = HuggingFaceEmbeddings(
+    model_name=EMBEDDING_MODEL,
+    encode_kwargs={"normalize_embeddings": True}
+)
 
 llm = ChatOpenAI(
     base_url=LM_STUDIO_URL,
@@ -102,33 +109,71 @@ def save_brain(entries: list):
         json.dump(entries, f, ensure_ascii=False, indent=2)
 
 
-def load_or_create_faiss() -> FAISS:
-    """Загружает индекс FAISS или создаёт новый"""
-    if os.path.exists(FAISS_INDEX):
-        return FAISS.load_local(FAISS_INDEX, embeddings, allow_dangerous_deserialization=True)
-    else:
-        # Создаём пустой индекс
-        return FAISS.from_texts([], embeddings)
+def rebuild_faiss_index() -> FAISS:
+    brain = load_brain()
+
+    index = faiss.IndexFlatIP(768)  # 768 = размерность all-mpnet-base-v2
+
+    # 2. Создаём пустой FAISS-объект с этим индексом
+    db = FAISS(
+        embedding_function=embeddings,
+        index=index,
+        docstore=InMemoryDocstore({}),
+        index_to_docstore_id={}
+    )
+
+    if not brain:
+        print("⚠️ brain.json пуст. Возвращаю пустой индекс.")
+        return db
+
+    # 3. Готовим данные
+    texts = [item["text"] for item in brain]
+    metadatas = [{"id": item["id"], "topic": item.get("topic", "")} for item in brain]
+    ids = [item["id"] for item in brain]
+
+    print("🔄 Векторизация + добавление в индекс...")
+
+    # 4. Векторизуем ВРУЧНУЮ (чтобы контролировать нормализацию)
+    vectors = embeddings.embed_documents(texts)
+    vectors_np = np.array(vectors, dtype=np.float32)
+
+    faiss.normalize_L2(vectors_np)
+
+    # 6. Добавляем векторы в индекс напрямую (быстро, без лишней абстракции)
+    db.index.add(vectors_np)
+
+    # 7. Синхронизируем docstore и index_to_docstore_id (это делает LangChain внутри add_texts, но мы делаем вручную для контроля)
+    from langchain_core.documents import Document
+    for i, (text, meta, uid) in enumerate(zip(texts, metadatas, ids)):
+        db.docstore._dict[uid] = Document(page_content=text, metadata=meta)
+        db.index_to_docstore_id[i] = uid
+
+    db.save_local(FAISS_INDEX)
+    print("✅ Индекс перестроен (Cosine/IP, dim=768)")
+    return db
 
 
-def find_similar_lc(query_text: str, db: FAISS, threshold: float = 0.60, top_k: int = 5) -> list:
-    """
-    LangChain-версия поиска похожих.
-    Возвращает список записей с сходством > threshold.
-    """
-    # similarity_search_with_score возвращает (Document, score)
-    docs_with_scores = db.similarity_search_with_score(query_text, k=top_k)
+def find_similar_lc(query_text: str, db: FAISS, threshold: float = 0.75, top_k: int = 5) -> list:
+    if db.index.ntotal == 0:
+        print("⚠️ Индекс пуст. Поиск невозможен.")
+        return []
 
+    actual_k = min(top_k, db.index.ntotal)
+    docs_with_scores = db.similarity_search_with_score(query_text, k=actual_k)
+
+    print(f"\nТОП-{len(docs_with_scores)} наиболее релевантных:")
     similar = []
     for doc, score in docs_with_scores:
-        # Для all-MiniLM + FAISS с нормализованными векторами: выше = лучше
+        preview = doc.page_content[:60].replace('\n', ' ').strip()
+        print(f"  • [{score:.3f}] {preview}...")
+
         if score > threshold:
             similar.append({
                 "id": doc.metadata.get("id"),
-                "similarity": float(score),
+                "similarity": score,
                 "text": doc.page_content
             })
-
+    print("-" * 50)
     return sorted(similar, key=lambda x: x["similarity"], reverse=True)
 
 
@@ -182,7 +227,7 @@ def save_knowledge_lc(parsed: dict, db: FAISS) -> str:
     )
     db.save_local(FAISS_INDEX)
 
-    print(f"✅ Сохранено: {entry['text'][:40]}...")
+    print(f"OK: Сохранено: {entry['text'][:40]}...")
     return entry_id
 
 
@@ -196,7 +241,11 @@ def main():
     print("-" * 30)
 
     # Загружаем векторы
-    db = load_or_create_faiss()
+    if not os.path.exists(FAISS_INDEX):
+        db = rebuild_faiss_index()
+    else:
+        db = FAISS.load_local(FAISS_INDEX, embeddings, allow_dangerous_deserialization=True)
+        print("OK: Существующий FAISS-индекс загружен.")
 
     while True:
         user_input = input("\nuser: ").strip()
@@ -227,21 +276,23 @@ def main():
 
         print("Векторизую и проверяю связи...")
 
-        similar = find_similar_lc(parsed["text"], db, threshold=0.60)
+        similar = find_similar_lc(parsed["text"], db)
 
         if not similar:
-            print("NEW: Похожих тем не найдено.")
+            print("OK: Похожих тем не найдено.")
             decision = "new"
         else:
             best_match = similar[0]
             score = best_match['similarity']
-            print(f"🔗 Найдено: {best_match['text'][:50]}... (сходство: {score:.2f})")
+            print(f"Прикреплено к: {best_match['text'][:30]}... (сходство: {score:.3f})")
+            print("=" * 50)
+
 
             # Логика зон
-            if score > 0.85:
+            if score > 0.90:
                 print("Высокое сходство. Проверяю на дубликат...")
                 decision = decide_with_llm_lc(parsed["text"], similar)
-            elif score > 0.60:
+            elif score > 0.75:
                 print("Интересная связь. Это дополнение к существующей теме.")
                 decision = "complement"
 
