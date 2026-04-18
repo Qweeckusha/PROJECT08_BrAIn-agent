@@ -13,6 +13,9 @@ from langchain_core.output_parsers import StrOutputParser
 import faiss
 from langchain_community.docstore.in_memory import InMemoryDocstore
 
+from . import models
+
+
 # ==========================================
 #               КОНФИГУРАЦИЯ
 # ==========================================
@@ -20,18 +23,16 @@ LM_STUDIO_URL = "http://localhost:1234/v1"
 GENERATION_MODEL = "qwen/qwen3-4b-2507"
 EMBEDDING_MODEL = "sentence-transformers/all-mpnet-base-v2"
 
-BRAIN_FILE = "brain.json"
-FAISS_INDEX = "faiss_index"
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))    # Путь к корню проекта (ai-agent/)
+FAISS_INDEX = os.path.join(PROJECT_ROOT, "faiss_index")
+BRAIN_FILE = os.path.join(PROJECT_ROOT, "brain.json")
 
 # ==========================================
 #         ИНИЦИАЛИЗАЦИЯ КОМПОНЕНТОВ
 # ==========================================
 print("📦 Загрузка LangChain компонентов...")
 
-embeddings = HuggingFaceEmbeddings(
-    model_name=EMBEDDING_MODEL,
-    encode_kwargs={"normalize_embeddings": True}
-)
+embeddings = models.embeddings
 
 llm = ChatOpenAI(
     base_url=LM_STUDIO_URL,
@@ -232,86 +233,166 @@ def save_knowledge_lc(parsed: dict, db: FAISS) -> str:
 
 
 # ==========================================
-#                   main
+#                 Контракт
 # ==========================================
+def process_ingest(text: str) -> dict:
+    """
+    Принимает текст, обрабатывает его и сохраняет в базу.
+    Возвращает JSON со статусом для фронтенда.
+    Полностью повторяет логику твоего main(), но без input/print.
+    """
+    if not text or not text.strip():
+        return {"status": "error", "message": "Пустой текст", "data": None}
 
-def main():
-    print("🧠 BrAIn Ingest (LangChain Edition)")
-    print("Вводи текст (или 'q' для выхода)")
-    print("-" * 30)
+    try:
+        # 1. Парсинг (как в main)
+        raw_response = parse_chain.invoke({"input": text})
+        clean = raw_response.strip().replace("```json", "").replace("```", "").strip()
+        parsed = json.loads(clean)
 
-    # Загружаем векторы
-    if not os.path.exists(FAISS_INDEX):
-        db = rebuild_faiss_index()
-    else:
-        db = FAISS.load_local(FAISS_INDEX, embeddings, allow_dangerous_deserialization=True)
-        print("OK: Существующий FAISS-индекс загружен.")
+        if not parsed or not all(k in parsed for k in ["text", "topic", "tags"]):
+            return {"status": "error", "message": "Не удалось распарсить JSON", "data": parsed}
 
-    while True:
-        user_input = input("\nuser: ").strip()
-        if user_input.lower() == 'q':
-            break
-        if not user_input:
-            continue
+        # 2. Загрузка/создание базы (как в main)
+        if not os.path.exists(FAISS_INDEX):
+            db = rebuild_faiss_index()
+        else:
+            db = FAISS.load_local(FAISS_INDEX, embeddings, allow_dangerous_deserialization=True)
 
-        print("⏳ Парсю смысл...")
-        try:
-            raw_response = parse_chain.invoke({"input": user_input})
-            clean = raw_response.strip().replace("```json", "").replace("```", "").strip()
-            parsed = json.loads(clean)
+        # 3. Поиск связей (используем ТВОЮ функцию с порогом 0.75)
+        similar = find_similar_lc(parsed["text"], db, threshold=0.75)
 
-            # Валидация результата парсинга
-            if not parsed or not all(k in parsed for k in ["text", "topic", "tags"]):
-                print("❌ Не удалось распарсить JSON. Попробуй чётче.")
-                print(f"Debug: {parsed}")
-                continue
-
-        except json.JSONDecodeError as e:
-            print(f"❌ Ошибка парсинга JSON: {e}")
-            print(f"Raw ответ модели: {raw_response[:200]}...")
-            continue
-        except Exception as e:
-            print(f"❌ Ошибка парсинга: {e}")
-            continue
-
-        print("Векторизую и проверяю связи...")
-
-        similar = find_similar_lc(parsed["text"], db)
+        best_match = None
 
         if not similar:
-            print("OK: Похожих тем не найдено.")
             decision = "new"
         else:
             best_match = similar[0]
             score = best_match['similarity']
-            print(f"Прикреплено к: {best_match['text'][:30]}... (сходство: {score:.3f})")
-            print("=" * 50)
 
-
-            # Логика зон
+            # ТВОЯ логика порогов (0.90 / 0.75)
             if score > 0.90:
-                print("Высокое сходство. Проверяю на дубликат...")
                 decision = decide_with_llm_lc(parsed["text"], similar)
             elif score > 0.75:
-                print("Интересная связь. Это дополнение к существующей теме.")
                 decision = "complement"
-
                 if "related_ids" not in parsed:
                     parsed["related_ids"] = []
                 parsed["related_ids"].append(best_match["id"])
             else:
                 decision = "new"
 
+        # 4. Действие
         if decision == "duplicate":
-            print("OK: Это дубликат. Пропускаем сохранение.")
-            continue
-        elif decision == "complement":
-            print(f"OK: Сохраняю как дополнение к {best_match['id']}")
-        else:
-            print("OK: Сохраняю как новую запись.")
+            return {
+                "status": "duplicate",
+                "message": "Это похоже на дубликат. Запись пропущена.",
+                "data": {"match": best_match["text"][:50] + "..."}
+            }
 
-        save_knowledge_lc(parsed, db)
+        # 5. Сохранение (твоя функция)
+        entry_id = save_knowledge_lc(parsed, db)
+
+        # 6. Успешный ответ для фронтенда
+        return {
+            "status": "success",
+            "message": f"Запись сохранена ({decision}).",
+            "data": {
+                "id": entry_id,
+                "topic": parsed["topic"],
+                "decision": decision,
+                "related_to": best_match["text"][:50] + "..." if best_match and decision == "complement" else None
+            }
+        }
+
+    except json.JSONDecodeError as e:
+        return {"status": "error", "message": f"Ошибка JSON: {e}", "data": None}
+    except Exception as e:
+        # Логируем в консоль сервера, но не ломаем ответ
+        print(f"❌ Ingest Error: {e}")
+        return {"status": "error", "message": str(e), "data": None}
 
 
-if __name__ == "__main__":
-    main()
+# ==========================================
+#                   main
+# ==========================================
+
+# def main():
+#     print("🧠 BrAIn Ingest (LangChain Edition)")
+#     print("Вводи текст (или 'q' для выхода)")
+#     print("-" * 30)
+#
+#     # Загружаем векторы
+#     if not os.path.exists(FAISS_INDEX):
+#         db = rebuild_faiss_index()
+#     else:
+#         db = FAISS.load_local(FAISS_INDEX, embeddings, allow_dangerous_deserialization=True)
+#         print("OK: Существующий FAISS-индекс загружен.")
+#
+#     while True:
+#         user_input = input("\nuser: ").strip()
+#         if user_input.lower() == 'q':
+#             break
+#         if not user_input:
+#             continue
+#
+#         print("⏳ Парсю смысл...")
+#         try:
+#             raw_response = parse_chain.invoke({"input": user_input})
+#             clean = raw_response.strip().replace("```json", "").replace("```", "").strip()
+#             parsed = json.loads(clean)
+#
+#             # Валидация результата парсинга
+#             if not parsed or not all(k in parsed for k in ["text", "topic", "tags"]):
+#                 print("❌ Не удалось распарсить JSON. Попробуй чётче.")
+#                 print(f"Debug: {parsed}")
+#                 continue
+#
+#         except json.JSONDecodeError as e:
+#             print(f"❌ Ошибка парсинга JSON: {e}")
+#             print(f"Raw ответ модели: {raw_response[:200]}...")
+#             continue
+#         except Exception as e:
+#             print(f"❌ Ошибка парсинга: {e}")
+#             continue
+#
+#         print("Векторизую и проверяю связи...")
+#
+#         similar = find_similar_lc(parsed["text"], db)
+#
+#         if not similar:
+#             print("OK: Похожих тем не найдено.")
+#             decision = "new"
+#         else:
+#             best_match = similar[0]
+#             score = best_match['similarity']
+#             print(f"Прикреплено к: {best_match['text'][:30]}... (сходство: {score:.3f})")
+#             print("=" * 50)
+#
+#
+#             # Логика зон
+#             if score > 0.90:
+#                 print("Высокое сходство. Проверяю на дубликат...")
+#                 decision = decide_with_llm_lc(parsed["text"], similar)
+#             elif score > 0.75:
+#                 print("Интересная связь. Это дополнение к существующей теме.")
+#                 decision = "complement"
+#
+#                 if "related_ids" not in parsed:
+#                     parsed["related_ids"] = []
+#                 parsed["related_ids"].append(best_match["id"])
+#             else:
+#                 decision = "new"
+#
+#         if decision == "duplicate":
+#             print("OK: Это дубликат. Пропускаем сохранение.")
+#             continue
+#         elif decision == "complement":
+#             print(f"OK: Сохраняю как дополнение к {best_match['id']}")
+#         else:
+#             print("OK: Сохраняю как новую запись.")
+#
+#         save_knowledge_lc(parsed, db)
+#
+#
+# if __name__ == "__main__":
+#     main()
