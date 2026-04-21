@@ -23,7 +23,7 @@ embeddings = models.embeddings
 
 db = FAISS.load_local(FAISS_INDEX, embeddings, allow_dangerous_deserialization=True)
 retriever = db.as_retriever(search_kwargs={"k": 5})
-print("✅: База загружена из 'faiss_index'.")
+print("ОК: База загружена из 'faiss_index'.")
 
 
 
@@ -95,69 +95,40 @@ def stream_query(question: str):
         yield f'event: error\ndata: {{"message": "П пустой запрос"}}\n\n'
         return
 
-    # try:
-    # 1. Получаем источники СРАЗУ (чтобы фронтенд мог отрисовать сайдбар)
-    docs = retriever.invoke(question)
-    sources = []
-    for doc in docs:
-        # 🛡 Безопасное извлечение текста: работаем и с Document, и с dict
-        raw_content = doc.page_content if hasattr(doc, 'page_content') else doc.get("page_content", "")
-        text = str(raw_content) if raw_content else ""
+    try:
+        # 1. Получаем источники СРАЗУ (чтобы фронтенд мог отрисовать сайдбар)
+        docs = retriever.invoke(question)
+        sources = []
+        for doc in docs:
+            # 🛡 Безопасное извлечение текста: работаем и с Document, и с dict
+            raw_content = doc.page_content if hasattr(doc, 'page_content') else doc.get("page_content", "")
+            text = str(raw_content) if raw_content else ""
 
-        # Безопасное извлечение темы
-        meta = doc.metadata if hasattr(doc, 'metadata') else doc.get("metadata", {})
-        topic = meta.get("topic", "info")
+            # Безопасное извлечение темы
+            meta = doc.metadata if hasattr(doc, 'metadata') else doc.get("metadata", {})
+            topic = meta.get("topic", "info")
 
-        sources.append({
-            "topic": topic,
-            "preview": text[:100].replace("\n", " ") + "..."
-        })
+            sources.append({
+                "topic": topic,
+                "preview": text[:100].replace("\n", " ") + "..."
+            })
 
-    # Отдаём источники первым событием
-    yield f'event: sources\ndata: {json.dumps(sources, ensure_ascii=False)}\n\n'
+        # Отдаём источники первым событием
+        yield f'event: sources\ndata: {json.dumps(sources, ensure_ascii=False)}\n\n'
 
-    if not docs:
-        yield f'event: answer\ndata: В базе пока нет информации об этом.\n\n'
-        yield 'event: done\ndata: {}\n\n'
+        if not docs:
+            yield f'event: answer\ndata: В базе пока нет информации об этом.\n\n'
+            yield 'event: done\ndata: {}\n\n'
+            return
+
+        # Стримим ответ модели по чанкам (~токенам)
+        for chunk in chain.stream({"question": question}):
+            if chunk:
+                yield f'event: answer\ndata: {chunk}\n\n'
+
+    except Exception as e:
+        print(f"❌ Stream Error: {e}")
+        yield f'event: error\ndata: {{"message": "Ошибка генерации ответа"}}\n\n'
         return
 
-    # Стримим ответ модели по чанкам (~токенам)
-    for chunk in chain.stream({"question": question}):
-        if chunk:
-            yield f'event: answer\ndata: {chunk}\n\n'
-
-    # except Exception as e:
-    #
-    #     print(f"❌ Stream Error: {e}")
-    #     yield f'event: error\ndata: {{"message": "Ошибка генерации ответа"}}\n\n'
-    #     return
-
     yield 'event: done\ndata: {}\n\n'
-
-
-# Интерфейс
-# print("\nСпрашивай (или 'q' для выхода):")
-# while True:
-#     user_input = input("\n🗣 Ты: ").strip()
-#     if user_input.lower() == 'q':
-#         break
-#     if not user_input:
-#         continue
-#
-#     print("⏳ Думаю...")
-#     try:
-#         docs = retriever.invoke(user_input)
-#         if not docs:
-#             print("В базе нет информации по этому запросу.")
-#             continue
-#
-#         print(f"Найдено {len(docs)} источников:")
-#         for i, doc in enumerate(docs):
-#             topic = doc.metadata.get('topic', 'info')
-#             preview = str(doc.page_content)[:80]
-#             print(f"  - {i + 1}. [{topic}] {preview}...")
-#
-#         response = chain.invoke(user_input)
-#         print(f"BrAIn: {response}")
-#     except Exception as e:
-#         print(f"❌❌❌ Ошибка: {e} ❌❌❌")

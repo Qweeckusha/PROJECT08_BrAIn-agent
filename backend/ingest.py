@@ -21,7 +21,6 @@ from . import models
 # ==========================================
 LM_STUDIO_URL = "http://localhost:1234/v1"
 GENERATION_MODEL = "qwen/qwen3-4b-2507"
-EMBEDDING_MODEL = "sentence-transformers/all-mpnet-base-v2"
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))    # Путь к корню проекта (ai-agent/)
 FAISS_INDEX = os.path.join(PROJECT_ROOT, "faiss_index")
@@ -30,7 +29,7 @@ BRAIN_FILE = os.path.join(PROJECT_ROOT, "brain.json")
 # ==========================================
 #         ИНИЦИАЛИЗАЦИЯ КОМПОНЕНТОВ
 # ==========================================
-print("📦 Загрузка LangChain компонентов...")
+print("ОК: Загрузка LangChain компонентов...")
 
 embeddings = models.embeddings
 
