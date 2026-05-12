@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>BrAIn</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          animation: {
+            'slide-in': 'slideIn 0.3s ease-out',
+          },
+          keyframes: {
+            slideIn: {
+              '0%': { transform: 'translateY(-20px)', opacity: '0' },
+              '100%': { transform: 'translateY(0)', opacity: '1' },
+            }
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-white text-gray-900 font-sans h-screen flex overflow-hidden" data-mode="read">
+
+  <!-- Сайдбар (Фиксированная ширина, скрыт на мобильных) -->
+  <aside class="hidden lg:flex flex-col w-72 bg-gray-50 border-r border-gray-200 shrink-0">
+    <div class="p-4 border-b border-gray-200 flex items-center justify-between">
+      <h2 class="font-bold text-gray-700">Источники</h2>
+      <span id="mode-label-sidebar" class="text-xs text-gray-500">Чтение</span>
+    </div>
+    <div id="sources-list" class="flex-1 overflow-y-auto p-4 space-y-3">
+      <p class="text-sm text-gray-400 italic text-center mt-10">Источники появятся здесь...</p>
+    </div>
+  </aside>
+
+  <!-- сновная область (Центральная колонка) -->
+  <main class="flex-1 flex flex-col min-w-0 relative bg-white">
+
+    <!-- Хедер (Тоггл режимов) -->
+      <header class="h-14 border-b border-gray-100 flex items-center justify-between px-6 shrink-0">
+    <div class="flex items-center gap-3">
+      <h1 class="text-lg font-bold text-gray-800">BrAIn</h1>
+      <!-- ✅ Вернули ID для JS -->
+      <span id="mode-label" class="text-sm text-gray-500">Режим: <strong>Чтение</strong></span>
+    </div>
+
+    <!-- Toggle Switch -->
+    <label class="relative inline-flex items-center cursor-pointer">
+      <input type="checkbox" id="mode-toggle" class="sr-only peer">
+      <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+      <span class="ml-2 text-sm font-medium text-gray-600">Запись</span>
+    </label>
+  </header>
+
+    <!-- Вывод ИИ (Скроллящаяся область) -->
+    <div id="output-container" class="flex-1 overflow-y-auto overflow-x-hidden">
+      <div class="max-w-3xl mx-auto px-6 py-8 min-h-full">
+        <div id="output" class="prose prose-lg max-w-none text-gray-800 break-words">
+          <p class="text-gray-500 text-center mt-20">Задай вопрос или добавь запись в базу...</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Поле ввода (Прижато к низу центральной колонки) -->
+    <div class="border-t border-gray-100 bg-white p-4 shrink-0">
+      <form id="input-form" class="max-w-3xl mx-auto flex gap-3 items-end">
+
+        <!-- Поле ввода -->
+        <div class="relative flex-1">
+          <input
+              type="text"
+              id="user-input"
+              placeholder="Спроси что-нибудь..."
+              class="w-full pl-4 pr-24 py-3.5 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 shadow-sm transition-all"
+              autocomplete="off"
+          />
+          <!-- Кнопка внутри поля (визуально, но не абсолютно) -->
+          <button
+            type="submit"
+            class="absolute right-2 top-1/2 -translate-y-1/2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium transition-colors"
+          >
+            <span id="btn-text">➤</span>
+          </button>
+        </div>
+
+      </form>
+      <!-- Подсказка вне формы, чтобы не зависеть от max-w-3xl -->
+      <p id="hint" class="text-center text-xs text-gray-400 mt-2">Powered by Qwen3</p>
+    </div>
+
+  </main>
+
+  <!-- Алерт -->
+  <div id="alert" class="hidden fixed top-20 right-6 px-4 py-3 rounded-lg shadow-lg text-sm font-medium animate-slide-in z-50 border"></div>
+
+  <!-- Логика -->
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
