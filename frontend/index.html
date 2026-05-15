@@ -4,40 +4,46 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BrAIn</title>
-    <link rel="stylesheet" href="static/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body data-mode="read">
-    <div class="app-container">
+    <div class="app-wrapper">
         <aside class="sidebar">
-            <h1 class="logo">🧠 BrAIn</h1>
-            <div class="mode-switch">
+            <div class="logo">🧠 BrAIn</div>
+
+            <div class="mode-selector">
                 <input type="radio" id="mode-read" name="mode" value="read" checked>
                 <label for="mode-read">🔍 Чтение</label>
+
                 <input type="radio" id="mode-write" name="mode" value="write">
                 <label for="mode-write">✍️ Запись</label>
             </div>
-            <div class="sources-list" id="sources-list">
+
+            <div class="sources-container" id="sources-list">
                 <p class="placeholder">Источники появятся здесь...</p>
             </div>
         </aside>
 
-        <main class="main-chat">
+        <main class="chat-area">
             <header class="chat-header">
-                <span id="current-mode">Режим: Чтение</span>
+                <span id="mode-indicator">Режим: Чтение</span>
             </header>
-            <div class="chat-output" id="output">
+
+            <div class="chat-content" id="output">
                 <p class="placeholder">Задай вопрос или добавь запись...</p>
             </div>
-            <form class="input-area" id="input-form">
+
+            <form class="input-wrapper" id="chat-form">
                 <textarea id="user-input" rows="1" placeholder="Спроси что-нибудь..."></textarea>
-                <button type="submit" id="submit-btn">Отправить</button>
+                <button type="submit" id="send-btn">Отправить</button>
             </form>
         </main>
     </div>
 
     <div class="alert" id="alert"></div>
 
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="static/js/app.js"></script>
+
+    <script src="/static/js/app.js"></script>
 </body>
 </html>

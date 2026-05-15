@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from . import query, ingest
 
-app = FastAPI(title="BrAIn Web", version="0.1.0")
+app = FastAPI(title="BrAIn Web", version="0.2.2")
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.mount("/static", StaticFiles(directory="frontend/static"), name="static")
